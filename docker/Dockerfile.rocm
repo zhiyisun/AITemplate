@@ -15,7 +15,7 @@
 # ROCM Docker Image for AITemplate
 FROM ubuntu:20.04
 
-ARG ROCMVERSION=5.2.3
+ARG ROCMVERSION=5.7.2
 ARG compiler_version=b0f4678b9058a4ae00200dfb1de0da5f2ea84dcb
 
 
@@ -25,10 +25,10 @@ ARG DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/.apt_$ROCMVERSION/
 # Add rocm repository
 RUN apt-get update
 RUN apt-get install -y wget gnupg
-RUN wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-RUN sh -c "echo deb [arch=amd64] $DEB_ROCM_REPO ubuntu main > /etc/apt/sources.list.d/rocm.list"
-RUN wget --no-check-certificate -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | apt-key add -
-RUN sh -c "echo deb https://apt.kitware.com/ubuntu/ bionic main | tee -a /etc/apt/sources.list"
+RUN mkdir --parents --mode=0755 /etc/apt/keyrings
+RUN wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
+RUN sh -c "echo deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/$ROCMVERSION/ubuntu focal main > /etc/apt/sources.list.d/amdgpu.list"
+RUN sh -c "echo deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian focal main > /etc/apt/sources.list.d/rocm.list"
 
 # Install dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
@@ -95,25 +95,15 @@ RUN git clone -b master https://github.com/RadeonOpenCompute/rocm-cmake.git  && 
 
 WORKDIR /
 
-ENV compiler_version=$compiler_version
-RUN sh -c "echo compiler version = '$compiler_version'"
-
-RUN --mount=type=ssh if [ "$compiler_version" != "release" ]; then \
-        git clone https://github.com/RadeonOpenCompute/llvm-project.git && \
-        cd llvm-project && \
-        git checkout "$compiler_version" && \
-        mkdir build && cd build && \
-        cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt" ../llvm && \
-        make -j 96 ; \
-    else echo "using the release compiler"; \
-    fi
+RUN --mount=type=ssh git clone https://github.com/RadeonOpenCompute/llvm-project.git && \
+ cd llvm-project && \
+ git switch rocm-5.7.x && \
+ mkdir build && cd build && \
+ cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=1 -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt" ../llvm && \
+ make -j 96 ;
 
 ENV HIP_CLANG_PATH='/llvm-project/build/bin'
 RUN sh -c "echo HIP_CLANG_PATH = '$HIP_CLANG_PATH'"
-
-# Fix compiler bug in 10736
-ADD ./docker/rocm_fix /rocm_fix
-RUN python3 /rocm_fix/fix_10736.py
 
 ADD ./docker/install/ /Install
 # necessary package
@@ -126,7 +116,7 @@ RUN bash /Install/install_test_dep.sh
 RUN bash /Install/install_doc_dep.sh
 
 # Install Pytorch
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm5.2
+RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm5.6
 
 # for detection
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
